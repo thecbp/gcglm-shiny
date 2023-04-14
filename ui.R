@@ -1,4 +1,5 @@
 library(shiny)
+library(shinyMatrix)
 
 ui <- navbarPage("GCGLM Study Planner App",
                  tabPanel("Simulation",
@@ -7,25 +8,36 @@ ui <- navbarPage("GCGLM Study Planner App",
 
                             # Side panel
                             sidebarPanel(
-                              # Add a numeric input for the number of covariates
-                              numericInput("numSelectCovariates", "Number of covariates:", value = 1, min = 1, max = 10),
-                              numericInput("numSelectOutcomes", "Number of outputs:", value = 1, min = 1, max = 10),
-                              numericInput("sampleSize", "Sample Size:", value = 50, min = 1, max = 1000),
-                              selectInput("copula", "Copula:", choices = c("Gaussian")),
+
+                              h3("Generate GCGLM Data"),
+
+                              wellPanel(
+                                h4("Dataset Options"),
+                                numericInput("sampleSize", "Sample Size:", value = 50, min = 1, max = 1000)
+                              ),
+
+                              wellPanel(
+                                h4("Covariate Options"),
+                                numericInput("numSelectCovariates", "Number of covariates:", value = 2, min = 1, max = 10),
+                                uiOutput("dynamicCovariates"),
+                                checkboxInput("scale", "Scale covariates?")
+                              ),
+
+                              wellPanel(
+                                h4("Output Options"),
+                                numericInput("numSelectOutcomes", "Number of outputs:", value = 1, min = 1, max = 10),
+                                uiOutput("dynamicOutcomes"),
+                                uiOutput("outcomeCorrelationMatrix")
+                              ),
 
                               # Add a well panel with inputs
-                              wellPanel(
-                                uiOutput("dynamicInputs"), # Placeholder for dynamic inputs
-                                uiOutput("dynamicOutcomes") # Placeholder for dynamic inputs
-                              ),
-                              actionButton("simulate", "Simulate")
+                              actionButton("simulate", "Simulate", width = "100%")
                             ),
 
                             # Main panel
                             mainPanel(
-                              # Add a text output to the main panel
-                              textOutput("text"),
-                              textOutput("statusBar")
+                              textOutput("statusBar"),
+                              tableOutput("table")
                             )
                           )
                  ),
