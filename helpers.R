@@ -1,11 +1,19 @@
+library(shiny)
+library(shinyMatrix)
+library(tidyverse)
+library(GGally)
+library(gridExtra)
+
 ################################################################################
 
 # Shiny Dashboard helper functions
 
 ################################################################################
 
-simulate_gcglm_data = function(sample_size, n_covariates, covar_params, n_outputs, outcome_params, scale) {
-
+simulate_gcglm_data = function(sample_size,
+                               n_covariates, covar_params,
+                               n_outcomes, outcome_params,
+                               coefmat, scale) {
 
   # Construct the covariates based on the inputs parameters
   covariates = gc.sample.x(n_covariates = n_covariates,
@@ -14,9 +22,12 @@ simulate_gcglm_data = function(sample_size, n_covariates, covar_params, n_output
                            scale = scale)
 
   # START ON GENERATING THE OUTCOMES NEXT
-  outcomes = gc.sample.y()
+  outcomes = gc.sample.y(n_outcomes = n_outcomes,
+                         params = outcome_params,
+                         data = covariates,
+                         coefmat = coefmat)
 
-  covariates
+  cbind(covariates, outcomes)
 }
 
 
@@ -64,42 +75,46 @@ gc.sample.x = function(n_covariates, params, N, scale) {
   X
 }
 
+# Derive the outcomes based on their correlation matrix + marginals + covariates
+gc.sample.y = function(n_outcomes, params, data, coefmat) {
 
-gc.sample.y = function(parms, ynames, formula.list, family.list, data, corr = NULL) {
-  J = length(formula.list)
   N = nrow(data)
-  ## Extract correlation (or generate if applicable)
-  if(is.null(corr)) {
-    corr = parms[grepl('corr', names(parms))]
-    corr = corrvec2corrmat(corr)
-  } else {
-    corr = matrix(corr, J, J) + diag(1 - corr, J)
-  }
-  ## Sample from Gaussian copula
-  Y = pnorm( mvtnorm::rmvnorm(N, sigma = corr) )
-  colnames(Y) = ynames
+  Sigma = params[["covariance"]]
+
+  ## Sample outcomes from Gaussian copula
+  Y = pnorm( mvtnorm::rmvnorm(N, sigma = Sigma) )
+  colnames(Y) = paste0("Y", 1:n_outcomes)
+
   ## Loop through outcomes; extract right parameters; generate outcome
-  for ( j in 1:J ){
-    yname_j       = ynames[j]
-    formula_j     = formula.list[[j]]
-    family_j      = family.list[[j]]
-    rhs.formula_j = formula_j[-2]
-    X_j           = model.matrix(rhs.formula_j, data)
-    parms_j       = parms[grepl( paste0(yname_j, '\\['), names(parms))]
-    if (family_j$family == 'gaussian') {
-      indx.sigmasq = which(grepl('sigmasq', names(parms_j)))
-      sigmasq_j    = parms_j[indx.sigmasq]   ## extract sigmasq
-      parms_j      = parms_j[-indx.sigmasq]  ## now only regression coeffs
-    }
-    parms_j = parms_j[paste0(yname_j, '[', colnames(X_j), ']')]  ## convert to beta; make sure order is correct based on X_j
-    mean_j  = family_j$linkinv(X_j %*% parms_j)
-    if (family_j$family == 'gaussian'){
-      Y[,j]        = qnorm(Y[,j], mean = mean_j, sd = sqrt(sigmasq_j))
-    } else if (family_j$family == 'binomial') {
-      Y[,j] = qbinom(Y[,j], size = 1, prob = family_j$linkinv(X_j %*% parms_j))
-    } else {
-      Y[,j] = qpois(Y[,j], lambda = family_j$linkinv(X_j %*% parms_j))
+  for ( j in 1:n_outcomes ){
+
+    betas = coefmat[j,] # 1 x p
+    XB = data %*% betas # (n x p) x (p x 1) = (n x 1)
+
+    Yj = colnames(Y)[j]
+    family_j = params[[Yj]][["family"]]
+
+    if (family_j == 'Normal'){
+
+      mu_j = params[[Yj]][["linkinv"]](XB)
+      sigma_j = params[[Yj]][["sigma"]]
+      Y[,j] = qnorm(Y[,j], mean = mu_j, sd = sigma_j)
+
+    } else if (family_j == 'Bernoulli') {
+
+      prob = params[[Yj]][["linkinv"]](XB)
+      Y[,j] = qbinom(Y[,j], size = 1, prob = prob)
+
+    } else if (family_j == 'Poisson') {
+
+      lambda = params[[Yj]][["linkinv"]](XB)
+      Y[,j] = qpois(Y[,j], lambda = lambda)
+
     }
   }
+
   data.frame(Y)
 }
+
+identity = function(x) { x }
+invlogit = function(x) { exp(x)/(1 + exp(x)) }
