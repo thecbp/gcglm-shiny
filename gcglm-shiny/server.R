@@ -4,8 +4,8 @@ server <- function(input, output, session) {
 
   # Create a reactive value to store simulated data
   simulated_data <- reactiveVal()
+  analyzed_data <- reactiveVal()
 
-  # Compile all of the
   covar_params = reactive({
 
     n_covariates = input$numSelectCovariates
@@ -36,12 +36,12 @@ server <- function(input, output, session) {
       params[[paste0("Y", i)]] = list()
       params[[paste0("Y", i)]][["family"]] = input[[paste0("outcome_dist_", i)]]
 
-      if (params[[paste0("Y", i)]][["family"]] == 'Normal'){
+      if (params[[paste0("Y", i)]][["family"]] == 'Gaussian'){
 
         params[[paste0("Y", i)]][["sigma"]] = input[[paste0("outcome_sigma_", i)]]
         params[[paste0("Y", i)]][["linkinv"]] = identity
 
-      } else if (params[[paste0("Y", i)]][["family"]] == 'Bernoulli') {
+      } else if (params[[paste0("Y", i)]][["family"]] == 'Binomial') {
 
         params[[paste0("Y", i)]][["linkinv"]] = invlogit
 
@@ -65,7 +65,7 @@ server <- function(input, output, session) {
       tagList(
         fluidRow(
           column(6, selectInput(paste0("covar_dist_", i), paste0("Distribution ", i, ":"),
-                                choices = c("Normal", "Lognormal"))),
+                                choices = c("Gaussian", "Lognormal"))),
           column(3, numericInput(paste0("covar_mu_", i), paste0("Mean ", i, ":"), value = 0)),
           column(3, numericInput(paste0("covar_sigma_", i), paste0("Sigma ", i, ":"), value = 1))
         )
@@ -157,24 +157,66 @@ server <- function(input, output, session) {
 
   # Create dynamic select inputs based on the numeric input value
   output$dynamicOutcomes <- renderUI({
+
     numOutputs <- input$numSelectOutcomes
     lapply(1:numOutputs, function(i) {
       selectInput(paste0("outcome_dist_", i), paste("Outcome Distribution", i, ":"),
-                  choices = c("Normal", "Bernoulli", "Poisson"))
+                  choices = c("Gaussian", "Binomial", "Poisson"))
     })
+
   })
 
   # Adding extra parameters for the Normal family
   output$dynamicExtraParameters <- renderUI({
+
     numOutputs <- input$numSelectOutcomes
     lapply(1:numOutputs, function(i) {
       distribution <- input[[paste0("outcome_dist_", i)]]
-      if (distribution == "Normal") {
+      if (distribution == "Gaussian") {
         numericInput(paste0("outcome_sigma_", i), paste("Sigma for outcome", i, ":"), value = 1)
       } else {
         NULL
       }
     })
+
+  })
+
+  # Extracting vector of outcome families
+  family.list <- reactive({
+
+    numOutcomes <- input$numSelectOutcomes
+    dists = character(numOutcomes)
+    for (j in 1:numOutcomes) { dists[j] = input[[paste0("outcome_dist_", j)]] }
+
+    dists
+
+  })
+
+  glm.formulas = reactive({
+
+    mat = input$glm_coefs
+
+    num_rows <- nrow(mat)
+    num_columns <- ncol(mat)
+    formulas <- vector(mode = "list", num_rows)
+
+    for (i in 1:num_rows) {
+
+      row <- mat[i, ]
+      non_zero_indices <- which(row != 0)
+      outcome_var = paste0("Y", i)
+
+      if (length(non_zero_indices) > 0) {
+        covariate_terms <- paste0("X", non_zero_indices, collapse = " + ")
+        formula <- paste(outcome_var, covariate_terms, sep = " ~ ")
+        formulas[[i]] <- as.formula(formula)
+      } else {
+        formulas[[i]] <- as.formula(paste(outcome_var, "1", sep = " ~ "))
+      }
+    }
+
+    formulas
+
   })
 
   # Simulate data when the simulate button is pressed
@@ -194,10 +236,26 @@ server <- function(input, output, session) {
 
   })
 
-  output$table <- renderTable({
-    # to use the dataset elsewhere from reactiveVal
-    data = simulated_data()
+  # Analyze the data using Alt's Stan code
+  observeEvent(input$analyze, {
+
+    samples = gcglm(data = simulated_data(),
+                    outcomes = outcome_params(),
+                    formula.list = glm.formulas(),
+                    mu0 = NULL, lambda = .01, init = 'mle',
+                    chains = input$numChains,
+                    iter_warmup = input$burnin,
+                    iter_sampling = (input$burnin + input$iters))
+
+    analyzed_data(samples)
+
   })
+
+  ##############################################################################
+
+  # Plots for the Simulation tab
+
+  ##############################################################################
 
   output$statusBar <- renderText({
     if (is.null(simulated_data())) {
@@ -206,12 +264,6 @@ server <- function(input, output, session) {
       return(NULL)
     }
   })
-
-  ##############################################################################
-
-  # Plots for the Simulation tab
-
-  ##############################################################################
 
   output$outcomeScatter = renderPlot({
 
@@ -234,8 +286,6 @@ server <- function(input, output, session) {
         theme(plot.title = element_text(hjust = 0.5))
 
     }
-
-
 
   })
 
@@ -261,7 +311,65 @@ server <- function(input, output, session) {
 
     }
 
+  })
 
+  ##############################################################################
+
+  # Plots for the Analyze tab
+
+  ##############################################################################
+
+  output$test = renderPrint({
+
+
+    if (is.null(simulated_data())) {
+      print("no data")
+    } else {
+
+    }
+
+    withProgress(message = "Simulating Platform-of-1 trials...", {
+
+      samples = analyzed_data()
+      print(samples)
+
+    })
+
+  })
+
+  output$betasHistograms = renderPlot({
+
+    truths = input$glm_coefs
+
+    samples = analyzed_data()$samples
+
+    if (!is.null(samples)) {
+
+      beta_samples = analyzed_data()$samples %>%
+        select(contains("beta")) %>%
+        pivot_longer(
+          cols = everything(),
+          names_to = "coefficient",
+          values_to = "val"
+        )
+
+      beta_samples %>%
+        ggplot(aes(x = val)) +
+        geom_density() +
+        facet_wrap(~coefficient) +
+        theme_bw() +
+        ggtitle("Posterior distributions of GLM coefficients") +
+        theme(plot.title = element_text(hjust = 0.5))
+
+    } else {
+
+      ggplot() +
+        geom_blank() +
+        theme_bw() +
+        ggtitle("No data has been simulated yet") +
+        theme(plot.title = element_text(hjust = 0.5))
+
+    }
 
   })
 

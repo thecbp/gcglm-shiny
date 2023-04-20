@@ -1,0 +1,11 @@
+name: shiny-app
+title:
+username:
+account: cbpascual
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 8909381
+bundleId: 7115181
+url: https://cbpascual.shinyapps.io/shiny-app/
+when: 1682014668.1424
+lastSyncTime: 1682014668.14241

@@ -1,0 +1,11 @@
+name: gcglm-shiny
+title:
+username:
+account: cbpascual
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 8909398
+bundleId: 7115187
+url: https://cbpascual.shinyapps.io/gcglm-shiny/
+when: 1682014765.39042
+lastSyncTime: 1682014765.39043
